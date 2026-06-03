@@ -69,3 +69,7 @@ Everything runs on free tiers: Google Trends (no key), NewsAPI Developer plan, t
 
 - **`pytrends` is unreliable from CI runners** — Google rate-limits datacenter IPs, so some weeks the Trends step fails and the brief is news-only. This is expected and non-fatal.
 - Raw pulls (`data/`) and the generated `site/` are git-ignored; only the markdown briefs in `outputs/` are committed.
+
+## Built by
+
+**Mariana Saca** — analytics and consumer insights professional with a background in cultural intelligence at The Community / Publicis Groupe, working on Walmart and multicultural accounts. Master's in Business Analytics & Data Science from IE University, Madrid.
