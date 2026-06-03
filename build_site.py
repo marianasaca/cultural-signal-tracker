@@ -73,6 +73,13 @@ def main():
             md_path.read_text(encoding="utf-8"),
             extensions=["extra", "sane_lists"],
         )
+        # Source citations are markdown links; make external ones open in a
+        # new tab so readers don't navigate away from the brief.
+        body = re.sub(
+            r'<a href="(https?://)',
+            r'<a target="_blank" rel="noopener noreferrer" href="\1',
+            body,
+        )
         (SITE_DIR / html_name).write_text(
             PAGE_TEMPLATE.format(title=f"Brief {date}", css=PAGE_CSS, body=body),
             encoding="utf-8",

@@ -69,6 +69,12 @@ SYSTEM_PROMPT = (
     "signal has no natural fit for those products, say so plainly — note it's "
     "more relevant to retail or CPG food brands — and skip GSK for that "
     "signal. Don't force a GSK angle where it doesn't belong.\n\n"
+    "SOURCE LINKS: every time you cite a news article, render the source name "
+    "as a markdown link to that article's URL, formatted exactly like "
+    "'[PRNewswire](https://www.prnewswire.com/...)'. Use the exact URL given "
+    "after 'URL:' for that article in the news data — never invent or guess a "
+    "URL. Every cited article must have a clickable source link. If an article "
+    "has no URL in the data, name the source in plain text without a link.\n\n"
     "Output a markdown brief in this exact order:\n"
     "1. An H1 markdown heading — the line must start with '# ': "
     "'# Weekly Cultural Signal Report: US Hispanic Consumer Culture'. Put the "
@@ -162,7 +168,10 @@ def format_news(json_path):
                 source = (art.get("source") or {}).get("name", "?")
                 published = (art.get("publishedAt") or "")[:10]
                 desc = (art.get("description") or "").strip()
+                url = (art.get("url") or "").strip()
                 lines.append(f"    - {title} ({source}, {published})")
+                if url:
+                    lines.append(f"      URL: {url}")
                 if desc:
                     lines.append(f"      {desc}")
     return "\n".join(lines)
