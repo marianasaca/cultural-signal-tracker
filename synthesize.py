@@ -170,7 +170,7 @@ def format_news(json_path):
 
 def main():
     load_dotenv()  # lets GEMINI_API_KEY live in .env if you prefer
-    api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+    api_key = (os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or "").strip()
     if not api_key:
         print("ERROR: GEMINI_API_KEY not found. Set it in your .env file.")
         return
