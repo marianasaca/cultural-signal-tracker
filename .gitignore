@@ -1,0 +1,16 @@
+# Secrets — never commit
+.env
+
+# macOS
+.DS_Store
+
+# Python
+venv/
+__pycache__/
+*.pyc
+
+# Collected data (raw outputs)
+data/
+
+# Generated static site (rebuilt from outputs/ each run)
+site/

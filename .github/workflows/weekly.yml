@@ -1,0 +1,72 @@
+name: Weekly Cultural Signal Pipeline
+
+on:
+  schedule:
+    - cron: "0 8 * * 1" # Mondays 08:00 UTC
+  workflow_dispatch: {} # allow manual runs from the Actions tab
+
+permissions:
+  contents: write # commit the new brief back to the repo
+  pages: write # publish to GitHub Pages
+  id-token: write # required by deploy-pages
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      # Google Trends frequently rate-limits datacenter IPs, so a failure
+      # here must not sink the whole run — synthesize.py falls back to a
+      # news-only brief when no trends file is produced.
+      - name: Collect Google Trends
+        run: python collect_trends.py
+        continue-on-error: true
+
+      - name: Collect News
+        env:
+          NEWSAPI_KEY: ${{ secrets.NEWSAPI_KEY }}
+        run: python collect_news.py
+
+      - name: Synthesize brief
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: python synthesize.py
+
+      - name: Commit new brief
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add outputs/
+          git commit -m "Weekly brief $(date -u +%Y-%m-%d)" || echo "No changes to commit"
+          git push
+
+      - name: Build static site
+        run: python build_site.py
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
