@@ -5,14 +5,23 @@ site/, and writes site/index.html listing all briefs newest-first. The
 site/ folder is what GitHub Pages publishes.
 """
 
+import csv
 import re
 from pathlib import Path
 
 import markdown
 
+from categories import KEYWORDS
+
 BASE_DIR = Path(__file__).parent
 OUTPUT_DIR = BASE_DIR / "outputs"
+DATA_DIR = BASE_DIR / "data"
 SITE_DIR = BASE_DIR / "site"
+
+# Sparkline colours by momentum direction.
+RISING = "#2e7d32"     # green
+DECLINING = "#c62828"  # red
+STEADY = "#9e9e9e"     # gray
 
 PAGE_CSS = """
   body { max-width: 760px; margin: 2rem auto; padding: 0 1rem;
@@ -26,6 +35,10 @@ PAGE_CSS = """
   ul { padding-left: 1.2rem; }
   .back { display: inline-block; margin-bottom: 1.5rem; font-size: .9rem; }
   .meta { color: #666; font-size: .9rem; }
+  .spark { display: inline-flex; align-items: center; gap: 4px;
+           margin: 2px 6px 2px 0; font-size: .72rem; color: #666;
+           vertical-align: middle; }
+  .spark svg { vertical-align: middle; }
 """
 
 PAGE_TEMPLATE = """<!doctype html>
@@ -57,6 +70,97 @@ def brief_date(path):
     return match.group(1) if match else path.stem
 
 
+def load_trends_series(date):
+    """Return {keyword: [interest, ...]} for the trends CSV of a given date.
+
+    The series is ordered by date (oldest first). Returns {} if no matching
+    trends CSV exists (e.g. Google rate-limited that week's run).
+    """
+    csv_path = DATA_DIR / f"trends_{date}.csv"
+    if not csv_path.exists():
+        return {}
+    rows = {}
+    with open(csv_path, newline="", encoding="utf-8") as f:
+        for row in csv.DictReader(f):
+            rows.setdefault(row["keyword"], []).append(
+                (row["date"], float(row["interest"]))
+            )
+    return {kw: [v for _, v in sorted(pts)] for kw, pts in rows.items()}
+
+
+def sparkline_svg(values, color, width=200, height=40, pad=3):
+    """Render a list of interest values as a small inline SVG line chart."""
+    if not values:
+        return ""
+    lo, hi = min(values), max(values)
+    span = hi - lo
+    n = len(values)
+    pts = []
+    for i, v in enumerate(values):
+        x = pad if n == 1 else pad + i * (width - 2 * pad) / (n - 1)
+        y = height / 2 if span == 0 else pad + (height - 2 * pad) * (1 - (v - lo) / span)
+        pts.append(f"{x:.1f},{y:.1f}")
+    return (
+        f'<svg width="{width}" height="{height}" viewBox="0 0 {width} {height}" '
+        f'preserveAspectRatio="none" role="img" '
+        f'aria-label="12-week search interest sparkline">'
+        f'<polyline fill="none" stroke="{color}" stroke-width="1.5" '
+        f'stroke-linejoin="round" stroke-linecap="round" points="{" ".join(pts)}"/>'
+        f"</svg>"
+    )
+
+
+def momentum_color(text_after_keyword):
+    """Pick a sparkline colour from the momentum word nearest a keyword."""
+    low = text_after_keyword.lower()
+    nearest = {}
+    for word, color in (
+        ("rising", RISING),
+        ("declining", DECLINING),
+        ("steady", STEADY),
+        ("early signal", STEADY),
+    ):
+        i = low.find(word)
+        if i != -1:
+            nearest[i] = color
+    return nearest[min(nearest)] if nearest else STEADY
+
+
+STRIP_TAGS = re.compile(r"<[^>]+>")
+BLOCK_RE = re.compile(r"<(p|li)>(.*?)</\1>", re.DOTALL)
+
+
+def add_sparklines(html, series):
+    """Append a keyword sparkline to each momentum line in the HTML.
+
+    A block (<p> or <li>) is treated as a momentum line if its text mentions
+    'momentum'. For every trends keyword named in that block, a coloured
+    sparkline of that keyword's 12-week interest is appended.
+    """
+    if not series:
+        return html
+
+    def augment(match):
+        tag, inner = match.group(1), match.group(2)
+        plain = STRIP_TAGS.sub("", inner)
+        if "momentum" not in plain.lower():
+            return match.group(0)
+
+        found = sorted(
+            (plain.find(kw), kw) for kw in series if plain.find(kw) != -1
+        )
+        spans = []
+        for idx, kw in found:
+            color = momentum_color(plain[idx + len(kw): idx + len(kw) + 80])
+            svg = sparkline_svg(series[kw], color)
+            spans.append(f'<span class="spark" title="{kw}">{kw}: {svg}</span>')
+        if not spans:
+            return match.group(0)
+        return f"<{tag}>{inner}<br>{''.join(spans)}</{tag}>"
+
+    return BLOCK_RE.sub(augment, html)
+
+
 def main():
     SITE_DIR.mkdir(exist_ok=True)
     briefs = sorted(OUTPUT_DIR.glob("brief_*.md"), reverse=True)
@@ -80,6 +184,9 @@ def main():
             r'<a target="_blank" rel="noopener noreferrer" href="\1',
             body,
         )
+        # Inject SVG sparklines next to momentum scores, using the trends CSV
+        # from the same run (skipped if that week's CSV isn't available).
+        body = add_sparklines(body, load_trends_series(date))
         (SITE_DIR / html_name).write_text(
             PAGE_TEMPLATE.format(title=f"Brief {date}", css=PAGE_CSS, body=body),
             encoding="utf-8",
