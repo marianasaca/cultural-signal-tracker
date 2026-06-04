@@ -14,7 +14,14 @@ from pathlib import Path
 
 import markdown
 
-from categories import KEYWORDS
+from categories import KEYWORDS, KEYWORDS_BY_CATEGORY
+
+# Human-readable names for the config category keys.
+CATEGORY_LABELS = {
+    "economic_resilience": "Economic Resilience",
+    "bicultural_fusion": "Bicultural Fusion",
+    "heritage_milestones": "Heritage & Milestones",
+}
 
 BASE_DIR = Path(__file__).parent
 OUTPUT_DIR = BASE_DIR / "outputs"
@@ -56,7 +63,16 @@ a:hover{text-decoration:underline}
   padding:.9rem 1rem;background:#fff}
 .metric-num{font-size:1.5rem;font-weight:700;line-height:1.1;
   font-variant-numeric:tabular-nums}
+.metric-num.sm{font-size:1rem;font-weight:600}
 .metric-label{font-size:.78rem;color:var(--muted);margin-top:.25rem}
+.databox{margin:1.4rem 0 .5rem}
+.databox .metrics{margin-bottom:0}
+.databox-title,.catchart-title{font-weight:600;font-size:.72rem;
+  letter-spacing:.1em;text-transform:uppercase;color:var(--muted);
+  margin:0 0 .6rem}
+.catchart{margin:1.6rem 0 2rem;padding:1.1rem 1.2rem;border:1px solid var(--line);
+  border-radius:12px;background:#fff}
+.catchart svg{display:block}
 .layout{display:grid;grid-template-columns:1fr;gap:2rem}
 .toc-title{font-weight:600;font-size:.72rem;letter-spacing:.1em;
   text-transform:uppercase;color:var(--muted);margin-bottom:.5rem}
@@ -105,7 +121,6 @@ PAGE_TEMPLATE = """<!doctype html>
 </div></header>
 <main class="wrap">
 <a class="back" href="index.html">&larr; All briefs</a>
-<section class="metrics">{metrics}</section>
 <div class="layout">
 <nav class="toc">{toc}</nav>
 <article class="brief">{body}</article>
@@ -152,20 +167,28 @@ def extract_so_what(md_text):
     return line.replace("**", "").strip("* ").strip()
 
 
-def news_article_count(date):
-    """Total articles fetched in the news JSON for a date, or None."""
+def news_article_breakdown(date):
+    """Article counts from the news JSON: (total, en, es).
+
+    Returns (None, 0, 0) when no news file exists for the date.
+    """
     path = DATA_DIR / f"news_{date}.json"
     if not path.exists():
-        return None
+        return None, 0, 0
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (ValueError, OSError):
-        return None
-    total = 0
+        return None, 0, 0
+    total = en = es = 0
     for langs in data.get("categories", {}).values():
-        for block in langs.values():
-            total += block.get("fetched", 0)
-    return total
+        for lang, block in langs.items():
+            n = block.get("fetched", 0)
+            total += n
+            if lang == "en":
+                en += n
+            elif lang == "es":
+                es += n
+    return total, en, es
 
 
 def load_trends_series(date):
@@ -187,27 +210,113 @@ def load_trends_series(date):
 
 
 def top_mover(series, recent_days=28, floor=5.0):
-    """Find the keyword with the largest % change (recent vs earlier avg).
+    """Identify the week's headline keyword. Returns (keyword, pct|None).
 
-    Only considers keywords whose recent average clears `floor`, so tiny
-    near-zero swings don't dominate. Returns (keyword, pct) or None.
+    Prefers the biggest *riser* among keywords with real recent volume
+    (recent avg >= floor), mirroring the brief's "Early signal" guardrail
+    so we don't headline a noisy low-volume spike. If nothing clears the
+    floor, falls back to the single highest-interest keyword so the card is
+    never blank. `pct` is None only when an earlier average is zero.
     """
-    best = None
-    best_abs = -1.0
+    scored = []  # (keyword, recent_avg, earlier_avg)
     for kw, vals in series.items():
         if len(vals) <= recent_days:
             continue
         recent, earlier = vals[-recent_days:], vals[:-recent_days]
         if not earlier:
             continue
-        r = sum(recent) / len(recent)
-        e = sum(earlier) / len(earlier)
-        if r < floor or e <= 0:
-            continue
-        pct = (r - e) / e * 100
-        if abs(pct) > best_abs:
-            best, best_abs = (kw, pct), abs(pct)
-    return best
+        scored.append((kw, sum(recent) / len(recent), sum(earlier) / len(earlier)))
+    if not scored:
+        return None
+
+    rising = [
+        (kw, (r - e) / e * 100)
+        for kw, r, e in scored
+        if r >= floor and e > 0 and r > e
+    ]
+    if rising:
+        return max(rising, key=lambda x: x[1])
+
+    # Fallback: the most-searched keyword right now.
+    kw, r, e = max(scored, key=lambda x: x[1])
+    return kw, ((r - e) / e * 100 if e > 0 else None)
+
+
+def category_strength(series, recent_days=28):
+    """Average recent search-interest level per category, across *active*
+    keywords only.
+
+    These long-tail keywords are mostly zero on any given day, so averaging
+    every keyword collapses each pillar toward ~0. Instead we average only
+    keywords with non-zero recent interest — the pillar's live signals — for
+    a more legible measure. Returns {category: (recent_avg, earlier_avg)};
+    earlier_avg uses the same active keywords and only colours the bar by
+    direction. Categories with no active keywords are omitted.
+    """
+    out = {}
+    for cat, kws in KEYWORDS_BY_CATEGORY.items():
+        recents, earliers = [], []
+        for k in kws:
+            vals = series.get(k)
+            if not vals:
+                continue
+            recent_avg = sum(vals[-recent_days:]) / len(vals[-recent_days:])
+            if recent_avg <= 0:
+                continue  # dormant this window — skip
+            recents.append(recent_avg)
+            earlier = vals[:-recent_days]
+            if earlier:
+                earliers.append(sum(earlier) / len(earlier))
+        if recents:
+            r = sum(recents) / len(recents)
+            e = sum(earliers) / len(earliers) if earliers else r
+            out[cat] = (r, e)
+    return out
+
+
+def category_bar_svg(cat_strength, width=620, row_h=34, label_w=170, pad=10):
+    """Horizontal bar chart of average recent search interest per category.
+
+    Bar length is proportional to the recent interest level (0-100 scale);
+    colour encodes direction vs the earlier window (green up, red down,
+    gray flat). The numeric label is the interest index, not a percentage.
+    """
+    if not cat_strength:
+        return ""
+    rows = sorted(cat_strength.items(), key=lambda kv: kv[1][0], reverse=True)
+    maxval = max(r for _, (r, _) in rows) or 1.0
+    val_w = 44
+    bar_max = width - label_w - val_w - pad * 2
+    height = pad * 2 + row_h * len(rows)
+    parts = [
+        f'<svg viewBox="0 0 {width} {height}" width="100%" height="{height}" '
+        f'role="img" aria-label="Average recent search interest by category" '
+        f'font-family="Inter, sans-serif">'
+    ]
+    for i, (cat, (recent, earlier)) in enumerate(rows):
+        y = pad + i * row_h
+        mid = y + row_h / 2
+        bar_w = recent / maxval * bar_max
+        diff = recent - earlier
+        color = RISING if diff > 1 else DECLINING if diff < -1 else STEADY
+        label = CATEGORY_LABELS.get(cat, cat)
+        bx = label_w + pad
+        parts.append(
+            f'<text x="{label_w}" y="{mid:.0f}" text-anchor="end" '
+            f'dominant-baseline="central" font-size="12" fill="#16181d">'
+            f"{html.escape(label)}</text>"
+        )
+        parts.append(
+            f'<rect x="{bx}" y="{y + 6:.0f}" width="{bar_w:.1f}" '
+            f'height="{row_h - 12}" rx="3" fill="{color}"/>'
+        )
+        parts.append(
+            f'<text x="{bx + bar_w + 6:.1f}" y="{mid:.0f}" '
+            f'dominant-baseline="central" font-size="11" fill="#5f6368">'
+            f"{recent:.0f}</text>"
+        )
+    parts.append("</svg>")
+    return "".join(parts)
 
 
 def sparkline_svg(values, color, width=200, height=40, pad=3):
@@ -241,6 +350,7 @@ def momentum_color(text_after_keyword):
         ("declining", DECLINING),
         ("steady", STEADY),
         ("early signal", STEADY),
+        ("new signal", RISING),
     ):
         i = low.find(word)
         if i != -1:
@@ -265,10 +375,11 @@ def add_sparklines(html_body, series):
     def augment(match):
         tag, inner = match.group(1), match.group(2)
         plain = STRIP_TAGS.sub("", inner)
-        # Trends lines in the brief are flagged with a "**Trend:**" /
-        # "**Trends:**" lead-in; that's our reliable hook for where a
-        # sparkline belongs.
-        if "trend:" not in plain.lower() and "trends:" not in plain.lower():
+        # A block earns sparklines if it reads like a momentum line — i.e. it
+        # mentions a direction word. This is robust to formatting drift in the
+        # brief (bold vs. "Trend:" vs. "Momentum:" lead-ins).
+        low = plain.lower()
+        if not any(w in low for w in ("rising", "declining", "steady", "early signal", "new signal")):
             return match.group(0)
 
         found = sorted(
@@ -299,11 +410,62 @@ def collect_h3(tokens):
     return out
 
 
-def metric_card(num, label):
+def metric_card(num, label, small=False):
+    cls = "metric-num sm" if small else "metric-num"
     return (
-        f'<div class="metric"><div class="metric-num">{html.escape(str(num))}</div>'
+        f'<div class="metric"><div class="{cls}">{html.escape(str(num))}</div>'
         f'<div class="metric-label">{html.escape(label)}</div></div>'
     )
+
+
+def data_box(daterange, total, en, es, n_signals, mover):
+    """The 'This Week's Data' card row shown after the So What line."""
+    if total is None:
+        articles_num, articles_label = "—", "Articles analyzed"
+    else:
+        articles_num = total
+        articles_label = f"Articles · {en} EN / {es} ES"
+    if mover:
+        kw, pct = mover
+        # pct is None when the keyword is newly appearing (no prior volume).
+        mover_num = f"{pct:+.0f}%" if pct is not None else "New"
+        mover_label = f"Top mover · {kw}"
+    else:
+        mover_num, mover_label = "—", "Top mover"
+    cards = (
+        metric_card(daterange, "Date range", small=True)
+        + metric_card(len(KEYWORDS), "Keywords tracked")
+        + metric_card(articles_num, articles_label)
+        + metric_card(n_signals, "Signals identified")
+        + metric_card(mover_num, mover_label)
+    )
+    return (
+        '<section class="databox">'
+        "<div class=\"databox-title\">This Week’s Data</div>"
+        f'<div class="metrics">{cards}</div></section>'
+    )
+
+
+SO_WHAT_RE = re.compile(
+    r"(<h2[^>]*>\s*So What This Week\s*</h2>\s*<p>.*?</p>)", re.DOTALL
+)
+
+
+def insert_after_so_what(body, snippet):
+    """Insert HTML right after the So What paragraph.
+
+    Falls back to placing it before the first signal heading, then to the
+    top of the body, so the box always appears even if the brief's wording
+    drifts.
+    """
+    if not snippet:
+        return body
+    if SO_WHAT_RE.search(body):
+        return SO_WHAT_RE.sub(lambda m: m.group(1) + snippet, body, count=1)
+    parts = re.split(r"(<h3)", body, maxsplit=1)
+    if len(parts) == 3:
+        return parts[0] + snippet + parts[1] + parts[2]
+    return snippet + body
 
 
 def render_brief(md_path):
@@ -329,17 +491,22 @@ def render_brief(md_path):
     series = load_trends_series(date)
     body = add_sparklines(body, series)
 
-    # At-a-glance metrics.
-    articles = news_article_count(date)
+    # "This Week's Data" box + category momentum chart, slotted in after the
+    # So What line and before the first signal.
+    total, en, es = news_article_breakdown(date)
     mover = top_mover(series)
-    metrics = (
-        metric_card(articles if articles is not None else "—", "Articles analyzed")
-        + metric_card(len(h3s), "Signals detected")
-        + metric_card(
-            f"{mover[1]:+.0f}%" if mover else "—",
-            f"Top mover · {mover[0]}" if mover else "Top mover",
+    box = data_box(extract_date_range(text, date), total, en, es, len(h3s), mover)
+
+    cat_strength = category_strength(series)
+    chart = ""
+    if cat_strength:
+        chart = (
+            '<section class="catchart">'
+            '<div class="catchart-title">Category Signal Strength '
+            "&middot; avg recent search interest</div>"
+            f"{category_bar_svg(cat_strength)}</section>"
         )
-    )
+    body = insert_after_so_what(body, box + chart)
 
     # Table of contents (signals only).
     if h3s:
@@ -358,7 +525,6 @@ def render_brief(md_path):
             fonts=FONTS,
             css=CSS,
             daterange=html.escape(extract_date_range(text, date)),
-            metrics=metrics,
             toc=toc,
             body=body,
         ),

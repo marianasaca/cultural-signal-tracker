@@ -30,25 +30,17 @@ PAUSE_SECONDS = 1         # small pause between requests to be polite
 # wrapped in parentheses to force (A OR B) AND (C OR D) grouping.
 # Quotes are used only on genuine multi-word concept phrases.
 NEWS_QUERIES = {
-    "consumer_behavior": {
-        "en": "(Hispanic OR Latino) AND (consumers OR shoppers OR grocery OR spending OR retail)",
-        "es": "(hispanos OR latinos) AND (consumidores OR compradores OR supermercado OR gasto OR compras)",
+    "economic_resilience": {
+        "en": '(Hispanic OR Latino) AND (inflation OR budget OR savings OR grocery OR "cost of living" OR "economic pressure")',
+        "es": '(hispanos OR latinos) AND (inflación OR presupuesto OR ahorro OR supermercado OR "costo de vida" OR "presión económica")',
     },
-    "cultural_identity": {
-        "en": '"Latino identity" OR "Hispanic culture" OR bicultural OR Spanglish OR "Latino community"',
-        "es": '"identidad latina" OR "cultura hispana" OR "comunidad latina" OR bicultural OR espanglish',
+    "bicultural_fusion": {
+        "en": '(Hispanic OR Latino) AND ("Gen Z" OR beauty OR TikTok OR wellness OR bilingual OR "lifestyle trends")',
+        "es": '(hispanos OR latinos) AND ("Generación Z" OR belleza OR TikTok OR bienestar OR bilingüe OR "tendencias de estilo de vida")',
     },
-    "marketing_media": {
-        "en": '"multicultural marketing" OR "Hispanic advertising" OR "Latino influencer" OR "bilingual campaign"',
-        "es": '"marketing multicultural" OR "publicidad hispana" OR "influencer latino" OR "campaña bilingüe"',
-    },
-    "tentpole_moments": {
-        "en": '"Hispanic Heritage Month" OR "Dia de los Muertos" OR quinceañera',
-        "es": '"Mes de la Herencia Hispana" OR "Día de los Muertos" OR quinceañera',
-    },
-    "retail_relevant": {
-        "en": '(Latino OR Hispanic) AND (Walmart OR Target OR retail OR "shopping trends")',
-        "es": '(latinos OR hispanos) AND (Walmart OR Target OR comercio OR "tendencias de compra")',
+    "heritage_milestones": {
+        "en": '(Hispanic OR Latino) AND (holiday OR celebration OR heritage OR tradition OR family OR quinceañera OR "Day of the Dead")',
+        "es": '(hispanos OR latinos) AND (festividad OR celebración OR herencia OR tradición OR familia OR quinceañera OR "Día de los Muertos")',
     },
 }
 
